@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OMC Agent Monitor</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="viewport">
+    <canvas id="scene"></canvas>
+  </main>
+
+  <aside id="sidebar">
+    <header class="sb-header">
+      <h1>🖥️ Agent Monitor</h1>
+      <div id="conn-status" class="conn-status off">CONNECTING...</div>
+    </header>
+
+    <section class="sb-section">
+      <label class="sb-label">Team</label>
+      <div class="sb-row">
+        <select id="team-select"><option value="">Scanning...</option></select>
+        <button id="btn-refresh" title="Refresh teams">↻</button>
+      </div>
+    </section>
+
+    <section class="sb-section">
+      <label class="sb-label">Pipeline</label>
+      <div id="pipeline" class="pipeline">—</div>
+    </section>
+
+    <section class="sb-section">
+      <label class="sb-label">Agents</label>
+      <div id="agent-list" class="agent-list">
+        <div class="empty-hint">No agents</div>
+      </div>
+    </section>
+
+    <section class="sb-section sb-grow">
+      <label class="sb-label">Tasks</label>
+      <div id="task-board" class="task-board">
+        <div class="empty-hint">No tasks yet</div>
+      </div>
+    </section>
+
+    <section class="sb-section sb-grow">
+      <label class="sb-label">Messages</label>
+      <div id="msg-log" class="msg-log">
+        <div class="empty-hint">No messages yet</div>
+      </div>
+    </section>
+  </aside>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

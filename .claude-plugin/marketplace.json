@@ -1,0 +1,17 @@
+{
+  "listing": {
+    "title": "Agent Monitor Dashboard",
+    "subtitle": "Real-time 2D visualization of Claude Code team agents",
+    "categories": ["visualization", "monitoring", "teams"],
+    "tags": ["dashboard", "agents", "canvas", "real-time", "websocket"],
+    "icon": "https://raw.githubusercontent.com/pacho-h/claude-agent-monitor/main/.claude-plugin/icon.png"
+  },
+  "compatibility": {
+    "minClaudeCodeVersion": "1.0.0",
+    "platforms": ["darwin", "linux", "win32"]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pacho-h/claude-agent-monitor"
+  }
+}
