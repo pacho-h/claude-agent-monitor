@@ -1,0 +1,10 @@
+{
+  "hooks": [
+    {
+      "event": "notification",
+      "pattern": "TeamCreate",
+      "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/hook-handler.mjs\" team-created",
+      "description": "Notify user about Agent Monitor when a team is created"
+    }
+  ]
+}

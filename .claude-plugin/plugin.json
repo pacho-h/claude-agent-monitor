@@ -1,0 +1,13 @@
+{
+  "name": "agent-monitor",
+  "version": "1.0.0",
+  "description": "Real-time 2D dashboard for visualizing Claude Code team agents",
+  "author": {
+    "name": "evar"
+  },
+  "license": "MIT",
+  "commands": "./commands/",
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": null
+}
