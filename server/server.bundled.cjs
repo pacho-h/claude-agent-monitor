@@ -5371,9 +5371,9 @@ var require_readdirp = __commonJS({
       return new ReaddirpStream(options);
     };
     var readdirpPromise = (root, options = {}) => {
-      return new Promise((resolve, reject) => {
+      return new Promise((resolve2, reject) => {
         const files = [];
-        readdirp(root, options).on("data", (entry) => files.push(entry)).on("end", () => resolve(files)).on("error", (error) => reject(error));
+        readdirp(root, options).on("data", (entry) => files.push(entry)).on("end", () => resolve2(files)).on("error", (error) => reject(error));
       });
     };
     readdirp.promise = readdirpPromise;
@@ -7027,7 +7027,7 @@ var require_is_binary_path = __commonJS({
 var require_constants4 = __commonJS({
   "node_modules/chokidar/lib/constants.js"(exports2) {
     "use strict";
-    var { sep } = require("path");
+    var { sep: sep2 } = require("path");
     var { platform } = process;
     var os = require("os");
     exports2.EV_ALL = "all";
@@ -7056,7 +7056,7 @@ var require_constants4 = __commonJS({
     exports2.KEY_ERR = "errHandlers";
     exports2.KEY_RAW = "rawEmitters";
     exports2.HANDLER_KEYS = [exports2.KEY_LISTENERS, exports2.KEY_ERR, exports2.KEY_RAW];
-    exports2.DOT_SLASH = `.${sep}`;
+    exports2.DOT_SLASH = `.${sep2}`;
     exports2.BACK_SLASH_RE = /\\/g;
     exports2.DOUBLE_SLASH_RE = /\/\//;
     exports2.SLASH_OR_BACK_SLASH_RE = /[/\\]/;
@@ -7452,13 +7452,13 @@ var require_nodefs_handler = __commonJS({
           }
         }).on(EV_ERROR, this._boundHandleError);
         return new Promise(
-          (resolve) => stream.once(STR_END, () => {
+          (resolve2) => stream.once(STR_END, () => {
             if (this.fsw.closed) {
               stream = void 0;
               return;
             }
             const wasThrottled = throttler ? throttler.clear() : false;
-            resolve();
+            resolve2();
             previous.getChildren().filter((item) => {
               return item !== directory && !current.has(item) && // in case of intersecting globs;
               // a path may have been filtered out of this readdir, but
@@ -8739,12 +8739,16 @@ var import_os = require("os");
 var import_meta = {};
 var SCRIPT_DIR = typeof __dirname !== "undefined" && __dirname !== "" ? __dirname : (0, import_path.dirname)((0, import_url.fileURLToPath)(import_meta.url));
 var PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || (0, import_path.join)(SCRIPT_DIR, "..");
-var PUBLIC_DIR = (0, import_path.join)(PLUGIN_ROOT, "server", "public");
-var PID_FILE = "/tmp/agent-monitor.pid";
+var PUBLIC_DIR = (0, import_path.resolve)(PLUGIN_ROOT, "server", "public") + import_path.sep;
+var BIND_HOST = process.env.BIND_HOST || "127.0.0.1";
 var BASE_PORT = parseInt(process.env.PORT || "3777", 10);
 var HOME = (0, import_os.homedir)();
 var TEAMS_DIR = (0, import_path.join)(HOME, ".claude", "teams");
 var TASKS_DIR = (0, import_path.join)(HOME, ".claude", "tasks");
+var STATE_DIR = (0, import_path.join)(HOME, ".claude", "agent-monitor");
+(0, import_fs.mkdirSync)(STATE_DIR, { recursive: true });
+var PID_FILE = (0, import_path.join)(STATE_DIR, "server.pid");
+var TEAM_NAME_RE = /^[a-zA-Z0-9_-]{1,64}$/;
 var MIME = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -8754,9 +8758,19 @@ var MIME = {
   ".svg": "image/svg+xml",
   ".ico": "image/x-icon"
 };
+var SECURITY_HEADERS = {
+  "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://localhost:* ws://127.0.0.1:* wss://localhost:* wss://127.0.0.1:*",
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "DENY",
+  "Referrer-Policy": "no-referrer"
+};
 async function safeReadJSON(p) {
   try {
-    return JSON.parse(await (0, import_promises.readFile)(p, "utf-8"));
+    const raw = await (0, import_promises.readFile)(p, "utf-8");
+    if (raw.length > 1e6) return null;
+    const obj = JSON.parse(raw);
+    if (Object.prototype.hasOwnProperty.call(obj, "__proto__")) return null;
+    return obj;
   } catch {
     return null;
   }
@@ -8765,13 +8779,13 @@ async function findAvailablePort(startPort, maxTries = 10) {
   const net = await import("net");
   for (let i = 0; i < maxTries; i++) {
     const port = startPort + i;
-    const available = await new Promise((resolve) => {
+    const available = await new Promise((resolve2) => {
       const srv = net.createServer();
-      srv.once("error", () => resolve(false));
+      srv.once("error", () => resolve2(false));
       srv.once("listening", () => {
-        srv.close(() => resolve(true));
+        srv.close(() => resolve2(true));
       });
-      srv.listen(port);
+      srv.listen(port, BIND_HOST);
     });
     if (available) return port;
   }
@@ -8779,7 +8793,7 @@ async function findAvailablePort(startPort, maxTries = 10) {
 }
 var httpServer = (0, import_http.createServer)((req, res) => {
   const url = new URL(req.url, `http://localhost`);
-  const filePath = (0, import_path.join)(PUBLIC_DIR, url.pathname === "/" ? "index.html" : url.pathname);
+  const filePath = (0, import_path.resolve)(PUBLIC_DIR, url.pathname === "/" ? "index.html" : url.pathname.slice(1));
   if (!filePath.startsWith(PUBLIC_DIR)) {
     res.writeHead(403);
     res.end("Forbidden");
@@ -8789,7 +8803,8 @@ var httpServer = (0, import_http.createServer)((req, res) => {
     const content = (0, import_fs.readFileSync)(filePath);
     res.writeHead(200, {
       "Content-Type": MIME[(0, import_path.extname)(filePath)] || "application/octet-stream",
-      "Cache-Control": "no-cache"
+      "Cache-Control": "no-cache",
+      ...SECURITY_HEADERS
     });
     res.end(content);
   } catch {
@@ -8797,13 +8812,24 @@ var httpServer = (0, import_http.createServer)((req, res) => {
     res.end("Not Found");
   }
 });
-var wss = new import_websocket_server.default({ server: httpServer });
+var wss = new import_websocket_server.default({
+  server: httpServer,
+  maxPayload: 64 * 1024,
+  // 64 KB limit
+  verifyClient: ({ req }) => {
+    const origin = req.headers["origin"];
+    if (origin && !origin.startsWith("http://localhost:") && !origin.startsWith("http://127.0.0.1:")) {
+      return false;
+    }
+    return true;
+  }
+});
 var teamWatchers = /* @__PURE__ */ new Map();
 var inboxCounts = /* @__PURE__ */ new Map();
 function discoverTeams() {
   if (!(0, import_fs.existsSync)(TEAMS_DIR)) return [];
   try {
-    return (0, import_fs.readdirSync)(TEAMS_DIR, { withFileTypes: true }).filter((d) => d.isDirectory() && (0, import_fs.existsSync)((0, import_path.join)(TEAMS_DIR, d.name, "config.json"))).map((d) => d.name);
+    return (0, import_fs.readdirSync)(TEAMS_DIR, { withFileTypes: true }).filter((d) => d.isDirectory() && TEAM_NAME_RE.test(d.name) && (0, import_fs.existsSync)((0, import_path.join)(TEAMS_DIR, d.name, "config.json"))).map((d) => d.name);
   } catch {
     return [];
   }
@@ -8908,14 +8934,27 @@ function setupWatcher(teamName) {
   teamWatchers.set(teamName, watcher);
 }
 wss.on("connection", (ws) => {
+  ws._lastSelect = 0;
   ws.send(JSON.stringify({ type: "init", teams: discoverTeams() }));
   ws.on("message", async (raw) => {
     try {
       const msg = JSON.parse(raw.toString());
       if (msg.type === "select_team") {
-        ws._team = msg.teamName;
-        setupWatcher(msg.teamName);
-        const state = await buildTeamState(msg.teamName);
+        const now = Date.now();
+        if (now - ws._lastSelect < 1e3) return;
+        ws._lastSelect = now;
+        const teamName = String(msg.teamName || "");
+        if (!TEAM_NAME_RE.test(teamName)) {
+          ws.send(JSON.stringify({ type: "error", message: "Invalid team name" }));
+          return;
+        }
+        if (!(0, import_fs.existsSync)((0, import_path.join)(TEAMS_DIR, teamName, "config.json"))) {
+          ws.send(JSON.stringify({ type: "error", message: "Team not found" }));
+          return;
+        }
+        ws._team = teamName;
+        setupWatcher(teamName);
+        const state = await buildTeamState(teamName);
         if (state) ws.send(JSON.stringify({ type: "team_state", ...state }));
       } else if (msg.type === "refresh") {
         ws.send(JSON.stringify({ type: "init", teams: discoverTeams() }));
@@ -8934,7 +8973,7 @@ setInterval(() => {
 function shutdown(signal) {
   console.log(`
   Received ${signal}, shutting down...`);
-  for (const [name, watcher] of teamWatchers) {
+  for (const [, watcher] of teamWatchers) {
     watcher.close();
   }
   teamWatchers.clear();
@@ -8956,8 +8995,8 @@ process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
 async function start() {
   const PORT = await findAvailablePort(BASE_PORT);
-  httpServer.listen(PORT, () => {
-    (0, import_fs.writeFileSync)(PID_FILE, JSON.stringify({ pid: process.pid, port: PORT }));
+  httpServer.listen(PORT, BIND_HOST, () => {
+    (0, import_fs.writeFileSync)(PID_FILE, JSON.stringify({ pid: process.pid, port: PORT }), { mode: 384 });
     console.log("");
     console.log("  Agent Monitor Dashboard");
     console.log(`  http://localhost:${PORT}`);

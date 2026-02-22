@@ -3,16 +3,20 @@
 // Process management for Agent Monitor server
 // Usage: node start.mjs [start|stop|status|open]
 
-import { existsSync, readFileSync, unlinkSync } from 'fs';
-import { spawn, execSync } from 'child_process';
+import { existsSync, readFileSync, unlinkSync, mkdirSync } from 'fs';
+import { spawn, spawnSync } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { platform } from 'os';
+import { platform, homedir } from 'os';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || join(__dirname, '..');
-const PID_FILE = '/tmp/agent-monitor.pid';
+
+// PID file in user-private directory
+const STATE_DIR = join(homedir(), '.claude', 'agent-monitor');
+mkdirSync(STATE_DIR, { recursive: true });
+const PID_FILE = join(STATE_DIR, 'server.pid');
 
 // Prefer bundled server, fall back to source
 const SERVER_BUNDLED = join(PLUGIN_ROOT, 'server', 'server.bundled.cjs');
@@ -20,7 +24,12 @@ const SERVER_SOURCE = join(PLUGIN_ROOT, 'server', 'server.js');
 
 function readPidFile() {
   try {
-    return JSON.parse(readFileSync(PID_FILE, 'utf-8'));
+    const data = JSON.parse(readFileSync(PID_FILE, 'utf-8'));
+    const port = parseInt(data.port, 10);
+    const pid = parseInt(data.pid, 10);
+    if (!Number.isInteger(port) || port < 1024 || port > 65535) return null;
+    if (!Number.isInteger(pid) || pid < 1) return null;
+    return { pid, port };
   } catch {
     return null;
   }
@@ -42,14 +51,12 @@ function getServerFile() {
 }
 
 function openBrowser(url) {
+  try { new URL(url); } catch { return; } // validate URL
   const os = platform();
-  try {
-    if (os === 'darwin') execSync(`open "${url}"`);
-    else if (os === 'linux') execSync(`xdg-open "${url}"`);
-    else if (os === 'win32') execSync(`start "" "${url}"`);
-  } catch {
-    console.log(`  Open manually: ${url}`);
-  }
+  if (os === 'darwin') spawnSync('open', [url], { stdio: 'ignore' });
+  else if (os === 'linux') spawnSync('xdg-open', [url], { stdio: 'ignore' });
+  else if (os === 'win32') spawnSync('cmd', ['/c', 'start', '', url], { stdio: 'ignore' });
+  else console.log(`  Open manually: ${url}`);
 }
 
 // ── Commands ─────────────────────────────────────────────────
@@ -111,7 +118,6 @@ function cmdStop() {
     try {
       process.kill(info.pid, 'SIGTERM');
       console.log(`  Stopping Agent Monitor (PID: ${info.pid})...`);
-      // Wait a moment then clean up
       setTimeout(() => {
         try { unlinkSync(PID_FILE); } catch {}
         console.log('  Server stopped.');

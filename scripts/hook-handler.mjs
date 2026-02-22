@@ -3,16 +3,20 @@
 // Hook event handler for Agent Monitor plugin
 // Called by Claude Code hooks to provide contextual notifications
 
-import { existsSync, readFileSync } from 'fs';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
 
-const PID_FILE = '/tmp/agent-monitor.pid';
+const PID_FILE = join(homedir(), '.claude', 'agent-monitor', 'server.pid');
 const event = process.argv[2];
 
 function isMonitorRunning() {
   try {
-    const info = JSON.parse(readFileSync(PID_FILE, 'utf-8'));
-    process.kill(info.pid, 0);
-    return info;
+    const data = JSON.parse(readFileSync(PID_FILE, 'utf-8'));
+    const port = parseInt(data.port, 10);
+    if (!Number.isInteger(port) || port < 1024 || port > 65535) return null;
+    process.kill(data.pid, 0);
+    return data;
   } catch {
     return null;
   }
@@ -22,15 +26,12 @@ switch (event) {
   case 'team-created': {
     const info = isMonitorRunning();
     if (info) {
-      // Monitor is running, output URL reminder
       console.log(`Agent Monitor is live at http://localhost:${info.port}`);
     } else {
-      // Monitor not running, suggest starting
       console.log('Tip: Run /monitor to visualize your team agents in real-time');
     }
     break;
   }
   default:
-    // Unknown event, silently ignore
     break;
 }

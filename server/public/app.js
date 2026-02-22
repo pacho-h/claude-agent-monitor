@@ -272,16 +272,16 @@ function parseMessageText(text) {
   try {
     const obj = JSON.parse(text);
     if (obj.type === 'task_assignment') {
-      return { type: 'task_assignment', display: `📋 ${obj.task?.subject || 'New task'}` };
+      return { type: 'task_assignment', display: '\u{1F4CB} ' + (obj.task?.subject || 'New task') };
     }
     if (obj.type === 'idle_notification' || obj.type === 'idle') {
-      return { type: 'idle_notification', display: '💤 Idle' };
+      return { type: 'idle_notification', display: '\u{1F4A4} Idle' };
     }
     if (obj.type === 'permission_request') {
-      return { type: 'permission', display: `🔑 ${obj.description || 'Permission request'}` };
+      return { type: 'permission', display: '\u{1F511} ' + (obj.description || 'Permission request') };
     }
     if (obj.type === 'shutdown_request') {
-      return { type: 'shutdown', display: '🛑 Shutdown request' };
+      return { type: 'shutdown', display: '\u{1F6D1} Shutdown request' };
     }
     if (obj.summary) return { type: 'message', display: obj.summary };
     if (obj.content) {
@@ -329,18 +329,18 @@ function showAgentPopover(agent, px, py) {
 
   const tasks = state.tasks.filter(t => t.owner === agent.name);
   const taskList = tasks.length
-    ? tasks.map(t => `<div class="pop-task ${t.status}">${statusIcon(t.status)} ${escHtml(t.subject || t.id)}</div>`).join('')
+    ? tasks.map(t => `<div class="pop-task ${escAttr(t.status)}">${statusIcon(t.status)} ${escHtml(t.subject || t.id)}</div>`).join('')
     : '<div class="pop-empty">No tasks</div>';
 
   el.innerHTML = `
-    <div class="pop-header" style="border-color: ${agent.color}">
-      <span class="pop-emoji">${agent.emoji}</span>
+    <div class="pop-header" style="border-color: ${escColor(agent.color)}">
+      <span class="pop-emoji">${escHtml(agent.emoji)}</span>
       <div>
         <div class="pop-name">${escHtml(agent.name)}</div>
         <div class="pop-type">${escHtml(agent.type || 'unknown')}</div>
       </div>
     </div>
-    <div class="pop-status ${agent.animState}">${agent.animState.toUpperCase()}</div>
+    <div class="pop-status ${escAttr(agent.animState)}">${escHtml((agent.animState || '').toUpperCase())}</div>
     <div class="pop-tasks">${taskList}</div>
   `;
 
@@ -379,7 +379,7 @@ function updateTeamSelector() {
   const prev = sel.value;
   sel.innerHTML = state.teams.length === 0
     ? '<option value="">No teams found</option>'
-    : state.teams.map(t => `<option value="${t}" ${t === state.activeTeam ? 'selected' : ''}>${t}</option>`).join('');
+    : state.teams.map(t => `<option value="${escAttr(t)}" ${t === state.activeTeam ? 'selected' : ''}>${escHtml(t)}</option>`).join('');
 
   if (state.activeTeam && sel.value !== state.activeTeam) sel.value = state.activeTeam;
 }
@@ -398,8 +398,8 @@ function updatePipelineDisplay() {
   const labels = ['PLAN', 'PRD', 'EXEC', 'VERIFY', 'FIX'];
   el.innerHTML = stages.map((s, i) => {
     const active = state.phase === s;
-    return `<span class="stage ${active ? 'active' : ''}">${active ? '★' : ''}${labels[i]}${active ? '★' : ''}</span>`;
-  }).join('<span class="stage-sep">━━</span>');
+    return `<span class="stage ${active ? 'active' : ''}">${active ? '\u2605' : ''}${labels[i]}${active ? '\u2605' : ''}</span>`;
+  }).join('<span class="stage-sep">\u2501\u2501</span>');
 }
 
 function updateTaskBoard() {
@@ -413,11 +413,11 @@ function updateTaskBoard() {
   const order = { in_progress: 0, pending: 1, completed: 2 };
   const sorted = [...state.tasks].sort((a, b) => (order[a.status] ?? 3) - (order[b.status] ?? 3));
   el.innerHTML = sorted.map(t => `
-    <div class="task-item ${t.status}">
+    <div class="task-item ${escAttr(t.status)}">
       <span class="task-status">${statusIcon(t.status)}</span>
       <div class="task-info">
         <div class="task-subject">${escHtml(t.subject || t.id)}</div>
-        <div class="task-meta">${t.owner ? escHtml(t.owner) : '<i>unassigned</i>'}${t.blockedBy?.length ? ' ⛔ blocked' : ''}</div>
+        <div class="task-meta">${t.owner ? escHtml(t.owner) : '<i>unassigned</i>'}${t.blockedBy?.length ? ' \u26D4 blocked' : ''}</div>
       </div>
     </div>
   `).join('');
@@ -434,16 +434,16 @@ function updateMessageLog() {
   el.innerHTML = recent.map(m => {
     const parsed = parseMessageText(m.text || m.content || '');
     const agent = state.agents.find(a => a.name === m.from);
-    const color = agent?.color || '#90a4ae';
+    const color = escColor(agent?.color || '#90a4ae');
     const time = m.timestamp ? new Date(m.timestamp).toLocaleTimeString() : '';
     return `
       <div class="msg-item">
         <span class="msg-dot" style="background:${color}"></span>
         <span class="msg-from">${escHtml(m.from || '?')}</span>
-        <span class="msg-arrow">→</span>
+        <span class="msg-arrow">\u2192</span>
         <span class="msg-to">${escHtml(m._to || '?')}</span>
         <span class="msg-text">${escHtml(parsed.display)}</span>
-        <span class="msg-time">${time}</span>
+        <span class="msg-time">${escHtml(time)}</span>
       </div>`;
   }).join('');
   el.scrollTop = el.scrollHeight;
@@ -457,11 +457,11 @@ function updateAgentList() {
     return;
   }
   el.innerHTML = state.agents.map(a => `
-    <div class="agent-item ${a.animState}">
-      <span class="agent-emoji">${a.emoji}</span>
+    <div class="agent-item ${escAttr(a.animState)}">
+      <span class="agent-emoji">${escHtml(a.emoji)}</span>
       <div class="agent-info">
         <span class="agent-name">${escHtml(a.name)}</span>
-        <span class="agent-status-dot ${a.animState}"></span>
+        <span class="agent-status-dot ${escAttr(a.animState)}"></span>
       </div>
     </div>
   `).join('');
@@ -481,14 +481,24 @@ window.addEventListener('DOMContentLoaded', () => {
 // ── Utilities ──────────────────────────────────────
 function statusIcon(status) {
   switch (status) {
-    case 'completed': return '✅';
-    case 'in_progress': return '🔄';
-    case 'pending': return '⏳';
-    default: return '❓';
+    case 'completed': return '\u2705';
+    case 'in_progress': return '\u{1F504}';
+    case 'pending': return '\u231B';
+    default: return '\u2753';
   }
 }
 
 function escHtml(s) {
   if (!s) return '';
-  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function escAttr(s) {
+  if (!s) return '';
+  return String(s).replace(/[^a-zA-Z0-9_-]/g, '');
+}
+
+function escColor(s) {
+  if (!s) return '#ffffff';
+  return /^#[0-9a-fA-F]{3,8}$/.test(s) ? s : '#ffffff';
 }
