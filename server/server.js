@@ -1,7 +1,7 @@
 import { createServer } from 'http';
-import { readFileSync, readdirSync, existsSync, writeFileSync, unlinkSync } from 'fs';
+import { readFileSync, readdirSync, existsSync, writeFileSync, unlinkSync, mkdirSync } from 'fs';
 import { readFile } from 'fs/promises';
-import { join, extname, dirname } from 'path';
+import { join, extname, dirname, resolve, sep } from 'path';
 import { fileURLToPath } from 'url';
 import { WebSocketServer } from 'ws';
 import chokidar from 'chokidar';
@@ -14,12 +14,20 @@ const SCRIPT_DIR = (typeof __dirname !== 'undefined' && __dirname !== '')
 
 // Plugin root: prefer env var, fall back to parent of server/
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || join(SCRIPT_DIR, '..');
-const PUBLIC_DIR = join(PLUGIN_ROOT, 'server', 'public');
-const PID_FILE = '/tmp/agent-monitor.pid';
+const PUBLIC_DIR = resolve(PLUGIN_ROOT, 'server', 'public') + sep; // trailing sep for safe prefix check
+const BIND_HOST = process.env.BIND_HOST || '127.0.0.1';
 const BASE_PORT = parseInt(process.env.PORT || '3777', 10);
 const HOME = homedir();
 const TEAMS_DIR = join(HOME, '.claude', 'teams');
 const TASKS_DIR = join(HOME, '.claude', 'tasks');
+
+// PID file in user-private directory
+const STATE_DIR = join(HOME, '.claude', 'agent-monitor');
+mkdirSync(STATE_DIR, { recursive: true });
+const PID_FILE = join(STATE_DIR, 'server.pid');
+
+// Team name validation: only safe directory names
+const TEAM_NAME_RE = /^[a-zA-Z0-9_-]{1,64}$/;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -31,9 +39,21 @@ const MIME = {
   '.ico': 'image/x-icon',
 };
 
+const SECURITY_HEADERS = {
+  'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://localhost:* ws://127.0.0.1:* wss://localhost:* wss://127.0.0.1:*",
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  'Referrer-Policy': 'no-referrer',
+};
+
 async function safeReadJSON(p) {
-  try { return JSON.parse(await readFile(p, 'utf-8')); }
-  catch { return null; }
+  try {
+    const raw = await readFile(p, 'utf-8');
+    if (raw.length > 1_000_000) return null; // 1 MB cap
+    const obj = JSON.parse(raw);
+    if (Object.prototype.hasOwnProperty.call(obj, '__proto__')) return null;
+    return obj;
+  } catch { return null; }
 }
 
 // ── Port Discovery ──────────────────────────────────────────
@@ -45,7 +65,7 @@ async function findAvailablePort(startPort, maxTries = 10) {
       const srv = net.createServer();
       srv.once('error', () => resolve(false));
       srv.once('listening', () => { srv.close(() => resolve(true)); });
-      srv.listen(port); // bind same interface as actual server (all)
+      srv.listen(port, BIND_HOST);
     });
     if (available) return port;
   }
@@ -55,7 +75,7 @@ async function findAvailablePort(startPort, maxTries = 10) {
 // ── HTTP Server ──────────────────────────────────────────────
 const httpServer = createServer((req, res) => {
   const url = new URL(req.url, `http://localhost`);
-  const filePath = join(PUBLIC_DIR, url.pathname === '/' ? 'index.html' : url.pathname);
+  const filePath = resolve(PUBLIC_DIR, url.pathname === '/' ? 'index.html' : url.pathname.slice(1));
   if (!filePath.startsWith(PUBLIC_DIR)) {
     res.writeHead(403); res.end('Forbidden'); return;
   }
@@ -64,6 +84,7 @@ const httpServer = createServer((req, res) => {
     res.writeHead(200, {
       'Content-Type': MIME[extname(filePath)] || 'application/octet-stream',
       'Cache-Control': 'no-cache',
+      ...SECURITY_HEADERS,
     });
     res.end(content);
   } catch {
@@ -72,7 +93,17 @@ const httpServer = createServer((req, res) => {
 });
 
 // ── WebSocket Server ─────────────────────────────────────────
-const wss = new WebSocketServer({ server: httpServer });
+const wss = new WebSocketServer({
+  server: httpServer,
+  maxPayload: 64 * 1024, // 64 KB limit
+  verifyClient: ({ req }) => {
+    const origin = req.headers['origin'];
+    if (origin && !origin.startsWith('http://localhost:') && !origin.startsWith('http://127.0.0.1:')) {
+      return false;
+    }
+    return true;
+  },
+});
 const teamWatchers = new Map();
 const inboxCounts = new Map();
 
@@ -80,7 +111,7 @@ function discoverTeams() {
   if (!existsSync(TEAMS_DIR)) return [];
   try {
     return readdirSync(TEAMS_DIR, { withFileTypes: true })
-      .filter(d => d.isDirectory() && existsSync(join(TEAMS_DIR, d.name, 'config.json')))
+      .filter(d => d.isDirectory() && TEAM_NAME_RE.test(d.name) && existsSync(join(TEAMS_DIR, d.name, 'config.json')))
       .map(d => d.name);
   } catch { return []; }
 }
@@ -195,15 +226,30 @@ function setupWatcher(teamName) {
 
 // ── WS Connections ───────────────────────────────────────────
 wss.on('connection', (ws) => {
+  ws._lastSelect = 0;
   ws.send(JSON.stringify({ type: 'init', teams: discoverTeams() }));
 
   ws.on('message', async (raw) => {
     try {
       const msg = JSON.parse(raw.toString());
       if (msg.type === 'select_team') {
-        ws._team = msg.teamName;
-        setupWatcher(msg.teamName);
-        const state = await buildTeamState(msg.teamName);
+        // Rate limit: 1 select per second
+        const now = Date.now();
+        if (now - ws._lastSelect < 1000) return;
+        ws._lastSelect = now;
+        // Validate team name
+        const teamName = String(msg.teamName || '');
+        if (!TEAM_NAME_RE.test(teamName)) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Invalid team name' }));
+          return;
+        }
+        if (!existsSync(join(TEAMS_DIR, teamName, 'config.json'))) {
+          ws.send(JSON.stringify({ type: 'error', message: 'Team not found' }));
+          return;
+        }
+        ws._team = teamName;
+        setupWatcher(teamName);
+        const state = await buildTeamState(teamName);
         if (state) ws.send(JSON.stringify({ type: 'team_state', ...state }));
       } else if (msg.type === 'refresh') {
         ws.send(JSON.stringify({ type: 'init', teams: discoverTeams() }));
@@ -224,24 +270,19 @@ setInterval(() => {
 // ── Graceful Shutdown ────────────────────────────────────────
 function shutdown(signal) {
   console.log(`\n  Received ${signal}, shutting down...`);
-  // Close watchers
-  for (const [name, watcher] of teamWatchers) {
+  for (const [, watcher] of teamWatchers) {
     watcher.close();
   }
   teamWatchers.clear();
-  // Close WebSocket connections
   for (const client of wss.clients) {
     client.close();
   }
   wss.close();
-  // Close HTTP server
   httpServer.close(() => {
-    // Remove PID file
     try { unlinkSync(PID_FILE); } catch {}
     console.log('  Server stopped.');
     process.exit(0);
   });
-  // Force exit after 5s
   setTimeout(() => process.exit(1), 5000);
 }
 
@@ -252,9 +293,8 @@ process.on('SIGINT', () => shutdown('SIGINT'));
 async function start() {
   const PORT = await findAvailablePort(BASE_PORT);
 
-  httpServer.listen(PORT, () => {
-    // Write PID file with port info
-    writeFileSync(PID_FILE, JSON.stringify({ pid: process.pid, port: PORT }));
+  httpServer.listen(PORT, BIND_HOST, () => {
+    writeFileSync(PID_FILE, JSON.stringify({ pid: process.pid, port: PORT }), { mode: 0o600 });
 
     console.log('');
     console.log('  Agent Monitor Dashboard');
