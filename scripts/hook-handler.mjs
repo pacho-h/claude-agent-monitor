@@ -14,8 +14,10 @@ function isMonitorRunning() {
   try {
     const data = JSON.parse(readFileSync(PID_FILE, 'utf-8'));
     const port = parseInt(data.port, 10);
+    const pid = parseInt(data.pid, 10);
     if (!Number.isInteger(port) || port < 1024 || port > 65535) return null;
-    process.kill(data.pid, 0);
+    if (!Number.isInteger(pid) || pid < 1) return null;
+    process.kill(pid, 0);
     return data;
   } catch {
     return null;
